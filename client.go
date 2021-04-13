@@ -145,6 +145,11 @@ func (c *Client) setConn(conn net.Conn) {
 	c.tls = isTLS
 }
 
+// GetConn returns the underlying network connection for the client
+func (c *Client) GetConn() net.Conn {
+	return c.conn
+}
+
 // Close closes the connection.
 func (c *Client) Close() error {
 	return c.Text.Close()

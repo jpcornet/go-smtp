@@ -29,7 +29,7 @@ type ConnectionState struct {
 
 type Conn struct {
 	conn   net.Conn
-	text   *textproto.Conn
+	Text   *textproto.Conn
 	server *Server
 	helo   string
 
@@ -87,7 +87,7 @@ func (c *Conn) init() {
 		}
 	}
 
-	c.text = textproto.NewConn(rwc)
+	c.Text = textproto.NewConn(rwc)
 }
 
 // Commands are dispatched to the appropriate handler functions.
@@ -166,6 +166,11 @@ func (c *Conn) Session() Session {
 	c.locker.Lock()
 	defer c.locker.Unlock()
 	return c.session
+}
+
+// GetConn returns the underlying net.Conn
+func (c *Conn) GetConn() net.Conn {
+	return c.conn
 }
 
 // Setting the user resets any message being generated
@@ -697,7 +702,7 @@ func (c *Conn) handleBdat(arg string) {
 		c.WriteResponse(552, EnhancedCode{5, 3, 4}, "Max message size exceeded")
 
 		// Discard chunk itself without passing it to backend.
-		io.Copy(ioutil.Discard, io.LimitReader(c.text.R, int64(size)))
+		io.Copy(ioutil.Discard, io.LimitReader(c.Text.R, int64(size)))
 
 		c.reset()
 		return
@@ -745,7 +750,7 @@ func (c *Conn) handleBdat(arg string) {
 
 	c.lineLimitReader.LineLimit = 0
 
-	chunk := io.LimitReader(c.text.R, int64(size))
+	chunk := io.LimitReader(c.Text.R, int64(size))
 	_, err = io.Copy(c.bdatPipe, chunk)
 	if err != nil {
 		// Backend might return an error early using CloseWithError without consuming
@@ -965,12 +970,12 @@ func (c *Conn) WriteResponse(code int, enhCode EnhancedCode, text ...string) {
 	}
 
 	for i := 0; i < len(text)-1; i++ {
-		c.text.PrintfLine("%d-%v", code, text[i])
+		c.Text.PrintfLine("%d-%v", code, text[i])
 	}
 	if enhCode == NoEnhancedCode {
-		c.text.PrintfLine("%d %v", code, text[len(text)-1])
+		c.Text.PrintfLine("%d %v", code, text[len(text)-1])
 	} else {
-		c.text.PrintfLine("%d %v.%v.%v %v", code, enhCode[0], enhCode[1], enhCode[2], text[len(text)-1])
+		c.Text.PrintfLine("%d %v.%v.%v %v", code, enhCode[0], enhCode[1], enhCode[2], text[len(text)-1])
 	}
 }
 
@@ -982,7 +987,7 @@ func (c *Conn) ReadLine() (string, error) {
 		}
 	}
 
-	return c.text.ReadLine()
+	return c.Text.ReadLine()
 }
 
 func (c *Conn) reset() {

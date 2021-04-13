@@ -52,7 +52,7 @@ type dataReader struct {
 
 func newDataReader(c *Conn) *dataReader {
 	dr := &dataReader{
-		r: c.text.R,
+		r: c.Text.R,
 	}
 
 	if c.server.MaxMessageBytes > 0 {
