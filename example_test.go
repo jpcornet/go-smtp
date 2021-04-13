@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/emersion/go-sasl"
-	"github.com/emersion/go-smtp"
+	"github.com/jpcornet/go-smtp"
 )
 
 func ExampleDial() {
