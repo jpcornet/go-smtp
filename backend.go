@@ -3,6 +3,7 @@ package smtp
 import (
 	"errors"
 	"io"
+	"net"
 )
 
 var (
@@ -19,6 +20,12 @@ type Backend interface {
 	// Called if the client attempts to send mail without logging in first.
 	// Return smtp.ErrAuthRequired if you don't want to support this.
 	AnonymousLogin(state *ConnectionState) (Session, error)
+}
+
+// A more modern SMTP server backend.
+type ConnectionAwareBackend interface {
+	// Called as soon as a connection comes in
+	IncomingConnection(c *Conn) (Session, error)
 }
 
 type BodyType string
@@ -58,6 +65,33 @@ type MailOptions struct {
 	Auth *string
 }
 
+// XClientOptions are options that are used on the XCLIENT extension
+type XClientOptions struct {
+	// Name is the name of the connecting client, usually from reverse DNS lookup
+	Name *string
+
+	// Addr is the remote IP address
+	Addr *net.IP
+
+	// Port is the remote TCP client port
+	Port *uint32
+
+	// Proto is either "SMTP" or "ESMTP"
+	Proto *string
+
+	// Helo is the remote name sent via the HELO (EHLO) command
+	Helo *string
+
+	// Login is a SASL login name
+	Login *string
+
+	// Destaddr is the original destination IP address
+	Destaddr *net.IP
+
+	// Destport is the original destination port number
+	Destport *uint32
+}
+
 // Session is used by servers to respond to an SMTP client.
 //
 // The methods are called when the remote client issues the matching command.
@@ -74,6 +108,11 @@ type Session interface {
 	Rcpt(to string) error
 	// Set currently processed message contents and send it.
 	Data(r io.Reader) error
+}
+
+type ConnectionAwareSession interface {
+	// Called as the HELO comes in, optionally returns welcome string
+	Hello(c ConnectionState, name string) (*string, error)
 }
 
 // LMTPSession is an add-on interface for Session. It can be implemented by

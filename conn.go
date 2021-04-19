@@ -36,6 +36,8 @@ type Conn struct {
 	// Number of errors witnessed on this connection
 	errCount int
 
+	// enhanced is true if the connection uses "enhanced" mode
+	enhanced   bool
 	session    Session
 	locker     sync.Mutex
 	binarymime bool
@@ -48,6 +50,8 @@ type Conn struct {
 
 	fromReceived bool
 	recipients   []string
+
+	authenticated bool // true if session has authenticated
 }
 
 func newConn(c net.Conn, s *Server) *Conn {
@@ -221,6 +225,42 @@ func (c *Conn) State() ConnectionState {
 	return state
 }
 
+func (c *Conn) XClientState() XClientOptions {
+	xclientopts := XClientOptions{}
+	xclientopts.Helo = &c.helo
+	if remoteip, remoteport, err := addr2ipport(c.conn.RemoteAddr()); err == nil {
+		xclientopts.Addr = &remoteip
+		xclientopts.Port = &remoteport
+	}
+	if localip, localport, err := addr2ipport(c.conn.LocalAddr()); err == nil {
+		xclientopts.Destaddr = &localip
+		xclientopts.Destport = &localport
+	}
+	var proto string
+	if c.enhanced {
+		proto = "ESMTP"
+	} else {
+		proto = "SMTP"
+	}
+	xclientopts.Proto = &proto
+	return xclientopts
+}
+
+func addr2ipport(n net.Addr) (net.IP, uint32, error) {
+	nstr := n.String()
+	colon := strings.LastIndexByte(nstr, ':')
+	if colon == -1 {
+		return nil, 0, errors.New("not an IP connection")
+	}
+	ip := net.ParseIP(strings.Trim(nstr[:colon], "[]"))
+	port, err := strconv.Atoi(nstr[colon+1:])
+	if err != nil {
+		return nil, 0, fmt.Errorf("Unparsable port number in %s: %w", nstr, err)
+	}
+	fmt.Printf("Converted connection %s to ip=%v port=%d\n", nstr, ip, port)
+	return ip, uint32(port), nil
+}
+
 func (c *Conn) authAllowed() bool {
 	_, isTLS := c.TLSConnectionState()
 	return !c.server.AuthDisabled && (isTLS || c.server.AllowInsecureAuth)
@@ -240,24 +280,29 @@ func (c *Conn) protocolError(code int, ec EnhancedCode, msg string) {
 
 // GREET state -> waiting for HELO
 func (c *Conn) handleGreet(enhanced bool, arg string) {
-	if !enhanced {
-		domain, err := parseHelloArgument(arg)
+	domain, err := parseHelloArgument(arg)
+	if err != nil {
+		c.WriteResponse(501, EnhancedCode{5, 5, 2}, "Domain/address argument required for HELO")
+		return
+	}
+
+	answer := []string{}
+	c.helo = domain
+	if casess, ok := c.session.(ConnectionAwareSession); ok {
+		helloreply, err := casess.Hello(c.State(), domain)
 		if err != nil {
-			c.WriteResponse(501, EnhancedCode{5, 5, 2}, "Domain/address argument required for HELO")
+			c.WriteResponse(toSMTPStatus(err))
 			return
 		}
-		c.helo = domain
-
-		c.WriteResponse(250, EnhancedCode{2, 0, 0}, fmt.Sprintf("Hello %s", domain))
-	} else {
-		domain, err := parseHelloArgument(arg)
-		if err != nil {
-			c.WriteResponse(501, EnhancedCode{5, 5, 2}, "Domain/address argument required for EHLO")
-			return
+		if helloreply != nil {
+			answer = append(answer, *helloreply)
 		}
-
-		c.helo = domain
-
+	}
+	if len(answer) == 0 {
+		answer = append(answer, fmt.Sprintf("Hello %s", domain))
+	}
+	if enhanced {
+		c.enhanced = enhanced
 		caps := []string{}
 		caps = append(caps, c.server.caps...)
 		if _, isTLS := c.TLSConnectionState(); c.server.TLSConfig != nil && !isTLS {
@@ -286,10 +331,10 @@ func (c *Conn) handleGreet(enhanced bool, arg string) {
 			caps = append(caps, "SIZE")
 		}
 
-		args := []string{"Hello " + domain}
-		args = append(args, caps...)
-		c.WriteResponse(250, NoEnhancedCode, args...)
+		answer = append(answer, caps...)
 	}
+
+	c.WriteResponse(250, NoEnhancedCode, answer...)
 }
 
 // READY state -> waiting for MAIL
@@ -518,6 +563,11 @@ func (c *Conn) handleAuth(arg string) {
 		return
 	}
 
+	if c.authenticated {
+		c.WriteResponse(503, EnhancedCode{5, 5, 0}, "only one successful AUTH command allowed per session")
+		return
+	}
+
 	parts := strings.Fields(arg)
 	if len(parts) == 0 {
 		c.WriteResponse(502, EnhancedCode{5, 5, 4}, "Missing parameter")
@@ -591,6 +641,7 @@ func (c *Conn) handleAuth(arg string) {
 
 	if c.Session() != nil {
 		c.WriteResponse(235, EnhancedCode{2, 0, 0}, "Authentication succeeded")
+		c.authenticated = true
 	}
 }
 
@@ -622,10 +673,20 @@ func (c *Conn) handleStartTLS() {
 	// This is different from just calling reset() since we want the Backend to
 	// be able to see the information about TLS connection in the
 	// ConnectionState object passed to it.
+	var newsession Session = nil
 	if session := c.Session(); session != nil {
 		session.Logout()
-		c.SetSession(nil)
 	}
+	if cabe, ok := c.server.Backend.(ConnectionAwareBackend); ok {
+		var err error
+		newsession, err = cabe.IncomingConnection(c)
+		if err != nil {
+			c.WriteResponse(toSMTPStatus(err))
+			c.Close()
+			return
+		}
+	}
+	c.SetSession(newsession)
 	c.reset()
 }
 

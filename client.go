@@ -417,6 +417,65 @@ func (c *Client) Rcpt(to string) error {
 	return nil
 }
 
+// Xclient issues an XCLIENT command to the server with the provided options.
+// Only non-nil filled options that are supported by the server are sent.
+// Note: Some parameters are (pointers to) strings. There is no check if those
+// parameters have the correct value. Specifically, if they contain whitespace
+// then the result is undefined.
+func (c *Client) XClient(xc XClientOptions) error {
+	ok, param := c.Extension("XCLIENT")
+	if !ok {
+		return errors.New("XCLIENT not supported")
+	}
+	// determine supported XClient parameters
+	param_arr := strings.Fields(strings.ToUpper(param))
+	xclient_ext := make(map[string]bool, len(param_arr))
+	for _, xclient_param := range param_arr {
+		xclient_ext[xclient_param] = true
+	}
+	cmd := ""
+	if _, ok := xclient_ext["ADDR"]; ok && xc.Addr != nil {
+		ipstr := xc.Addr.String()
+		if strings.ContainsRune(ipstr, ':') {
+			cmd += " ADDR=IPV6:" + ipstr
+		} else {
+			cmd += " ADDR=" + ipstr
+		}
+	}
+	if _, ok := xclient_ext["NAME"]; ok && xc.Name != nil {
+		cmd += " NAME=" + *xc.Name
+	}
+	if _, ok := xclient_ext["PORT"]; ok && xc.Port != nil {
+		cmd += " PORT=" + strconv.Itoa(int(*xc.Port))
+	}
+	if _, ok := xclient_ext["PROTO"]; ok && xc.Proto != nil {
+		cmd += " PROTO=" + *xc.Proto
+	}
+	if _, ok := xclient_ext["HELO"]; ok && xc.Helo != nil {
+		cmd += " HELO=" + *xc.Helo
+	}
+	if _, ok := xclient_ext["LOGIN"]; ok && xc.Login != nil {
+		cmd += " LOGIN=" + *xc.Login
+	}
+	if _, ok := xclient_ext["DESTADDR"]; ok && xc.Destaddr != nil {
+		ipstr := xc.Destaddr.String()
+		if strings.ContainsRune(ipstr, ':') {
+			cmd += " DESTADDR=IPV6:" + ipstr
+		} else {
+			cmd += " DESTADDR=" + ipstr
+		}
+	}
+	if _, ok := xclient_ext["DESTPORT"]; ok && xc.Destport != nil {
+		cmd += " DESTPORT=" + strconv.Itoa(int(*xc.Destport))
+	}
+	if len(cmd) == 0 {
+		return errors.New("No compatible XCLIENT options to send")
+	}
+	fmt.Println("XCLIENT", cmd)
+	_, _, err := c.cmd(220, "XCLIENT%s", cmd)
+	return err
+}
+
 type dataCloser struct {
 	c *Client
 	io.WriteCloser

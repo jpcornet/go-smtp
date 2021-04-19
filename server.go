@@ -140,6 +140,15 @@ func (s *Server) handleConn(c *Conn) error {
 		s.locker.Unlock()
 	}()
 
+	if cabe, ok := s.Backend.(ConnectionAwareBackend); ok {
+		sess, err := cabe.IncomingConnection(c)
+		if err != nil {
+			c.WriteResponse(toSMTPStatus(err))
+			c.Close()
+			return nil
+		}
+		c.session = sess
+	}
 	c.greet()
 
 	for {
