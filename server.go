@@ -61,10 +61,24 @@ type Server struct {
 	// attempts will be rejected. This setting overrides AllowInsecureAuth.
 	AuthDisabled bool
 
+	// If set, do not advertise PIPELINING (RFC2920) capability.
+	// Note that this doesn't change anything about the internal processing,
+	// which always allows pipelining.
+	PipeliningDisabled bool
+
+	// If set, do not advertise 8BITMIME (rfc6152) capability.
+	EightbitmimeDisabled bool
+
+	// If set, do not advertise ENHANCEDSTATUSCODES (rfc2034) capability.
+	// This also prevents enhanced status codes from being included in error messages.
+	EnhancedStatusDisabled bool
+
+	// If set, disable CHUNKING (rfc3030) capability.
+	ChunkingDisabled bool
+
 	// The server backend.
 	Backend Backend
 
-	caps  []string
 	auths map[string]SaslServerFactory
 	done  chan struct{}
 
@@ -82,7 +96,6 @@ func NewServer(be Backend) *Server {
 		Backend:  be,
 		done:     make(chan struct{}, 1),
 		ErrorLog: log.New(os.Stderr, "smtp/server ", log.LstdFlags),
-		caps:     []string{"PIPELINING", "8BITMIME", "ENHANCEDSTATUSCODES", "CHUNKING"},
 		auths: map[string]SaslServerFactory{
 			sasl.Plain: func(conn *Conn) sasl.Server {
 				return sasl.NewPlainServer(func(identity, username, password string) error {
@@ -260,6 +273,12 @@ func (s *Server) Close() error {
 // libraries implementing extensions of the SMTP protocol.
 func (s *Server) EnableAuth(name string, f SaslServerFactory) {
 	s.auths[name] = f
+}
+
+// DisableAuth disables an autnetication mechanism. Should only be used to disable the default PLAIN
+// mechanism that is enabled by default by the NewServer method.
+func (s *Server) DisableAuth(name string) {
+	delete(s.auths, name)
 }
 
 // ForEachConn iterates through all opened connections.

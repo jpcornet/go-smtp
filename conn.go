@@ -36,11 +36,11 @@ type Conn struct {
 	// Number of errors witnessed on this connection
 	errCount int
 
-	// enhanced is true if the connection uses "enhanced" mode
-	enhanced   bool
-	session    Session
-	locker     sync.Mutex
-	binarymime bool
+	// enhancedstatus is true if the connection uses "enhanced" mode
+	enhancedstatus bool
+	session        Session
+	locker         sync.Mutex
+	binarymime     bool
 
 	lineLimitReader *lineLimitReader
 	bdatPipe        *io.PipeWriter
@@ -237,7 +237,7 @@ func (c *Conn) XClientState() XClientOptions {
 		xclientopts.Destport = &localport
 	}
 	var proto string
-	if c.enhanced {
+	if c.enhancedstatus {
 		proto = "ESMTP"
 	} else {
 		proto = "SMTP"
@@ -295,16 +295,16 @@ func (c *Conn) handleGreet(enhanced bool, arg string) {
 			return
 		}
 		if helloreply != nil {
-			answer = append(answer, *helloreply)
+			answer = append(answer, fmt.Sprintf("%s %s", c.server.Domain, *helloreply))
 		}
 	}
 	if len(answer) == 0 {
-		answer = append(answer, fmt.Sprintf("Hello %s", domain))
+		answer = append(answer, fmt.Sprintf("%s Hello %s", c.server.Domain, domain))
 	}
 	if enhanced {
-		c.enhanced = enhanced
+		// Enabled Enhanced Status codes if the capability isn't disabled
+		c.enhancedstatus = !c.server.EnhancedStatusDisabled
 		caps := []string{}
-		caps = append(caps, c.server.caps...)
 		if _, isTLS := c.TLSConnectionState(); c.server.TLSConfig != nil && !isTLS {
 			caps = append(caps, "STARTTLS")
 		}
@@ -315,6 +315,18 @@ func (c *Conn) handleGreet(enhanced bool, arg string) {
 			}
 
 			caps = append(caps, authCap)
+		}
+		if !c.server.PipeliningDisabled {
+			caps = append(caps, "PIPELINING")
+		}
+		if !c.server.EightbitmimeDisabled {
+			caps = append(caps, "8BITMIME")
+		}
+		if !c.server.EnhancedStatusDisabled {
+			caps = append(caps, "ENHANCEDSTATUSCODES")
+		}
+		if !c.server.ChunkingDisabled {
+			caps = append(caps, "CHUNKING")
 		}
 		if c.server.EnableSMTPUTF8 {
 			caps = append(caps, "SMTPUTF8")
@@ -384,8 +396,6 @@ func (c *Conn) handleMail(arg string) {
 	opts := MailOptions{}
 
 	c.binarymime = false
-	// This is where the Conn may put BODY=8BITMIME, but we already
-	// read the DATA as bytes, so it does not effect our processing.
 	if len(fromArgs) > 1 {
 		args, err := parseArgs(fromArgs[1:])
 		if err != nil {
@@ -428,7 +438,14 @@ func (c *Conn) handleMail(arg string) {
 						return
 					}
 					c.binarymime = true
-				case "7BIT", "8BITMIME":
+				case "8BITMIME":
+					if c.server.EightbitmimeDisabled {
+						c.WriteResponse(500, EnhancedCode{5, 5, 4}, "8BITMIME is not implemented")
+						return
+					}
+					// This is where the Conn puts BODY=8BITMIME, but we already
+					// read the DATA as bytes, so it does not effect our processing.
+				case "7BIT":
 				default:
 					c.WriteResponse(500, EnhancedCode{5, 5, 4}, "Unknown BODY value")
 					return
@@ -728,6 +745,10 @@ func (c *Conn) handleData(arg string) {
 }
 
 func (c *Conn) handleBdat(arg string) {
+	if c.server.ChunkingDisabled {
+		c.WriteResponse(500, EnhancedCode{5, 5, 2}, "BDAT command not implemented")
+		return
+	}
 	args := strings.Fields(arg)
 	if len(args) == 0 {
 		c.WriteResponse(501, EnhancedCode{5, 5, 4}, "Missing chunk size argument")
@@ -857,6 +878,11 @@ func (c *Conn) handleBdat(arg string) {
 	} else {
 		c.WriteResponse(250, EnhancedCode{2, 0, 0}, "Continue")
 	}
+}
+
+// SetLineLimit sets the internal line limit of the SMTP connection. Set to 0 to disable line limits.
+func (c *Conn) SetLineLimit(limit int) {
+	c.lineLimitReader.LineLimit = limit
 }
 
 // ErrDataReset is returned by Reader pased to Data function if client does not
@@ -1016,11 +1042,14 @@ func (c *Conn) WriteResponse(code int, enhCode EnhancedCode, text ...string) {
 	// TODO: error handling
 	if c.server.WriteTimeout != 0 {
 		c.conn.SetWriteDeadline(time.Now().Add(c.server.WriteTimeout))
+		defer c.conn.SetWriteDeadline(time.Time{})
 	}
 
 	// All responses must include an enhanced code, if it is missing - use
-	// a generic code X.0.0.
-	if enhCode == EnhancedCodeNotSet {
+	// a generic code X.0.0... unless enhanced status codes have been disabled.
+	if !c.enhancedstatus {
+		enhCode = NoEnhancedCode
+	} else if enhCode == EnhancedCodeNotSet {
 		cat := code / 100
 		switch cat {
 		case 2, 4, 5:
@@ -1046,6 +1075,7 @@ func (c *Conn) ReadLine() (string, error) {
 		if err := c.conn.SetReadDeadline(time.Now().Add(c.server.ReadTimeout)); err != nil {
 			return "", err
 		}
+		defer c.conn.SetReadDeadline(time.Time{})
 	}
 
 	return c.Text.ReadLine()

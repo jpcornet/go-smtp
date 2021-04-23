@@ -205,7 +205,7 @@ func testServerEhlo(t *testing.T, fn ...serverConfigureFunc) (be *backend, s *sm
 	io.WriteString(c, "EHLO localhost\r\n")
 
 	scanner.Scan()
-	if scanner.Text() != "250-Hello localhost" {
+	if scanner.Text() != "250-localhost Hello localhost" {
 		t.Fatal("Invalid EHLO response:", scanner.Text())
 	}
 
@@ -750,7 +750,7 @@ func testStrictServer(t *testing.T) (s *smtp.Server, c net.Conn, scanner *bufio.
 	io.WriteString(c, "EHLO localhost\r\n")
 
 	scanner.Scan()
-	if scanner.Text() != "250-Hello localhost" {
+	if scanner.Text() != "250-localhost Hello localhost" {
 		t.Fatal("Invalid EHLO response:", scanner.Text())
 	}
 
