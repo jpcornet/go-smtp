@@ -255,9 +255,8 @@ func addr2ipport(n net.Addr) (net.IP, uint32, error) {
 	ip := net.ParseIP(strings.Trim(nstr[:colon], "[]"))
 	port, err := strconv.Atoi(nstr[colon+1:])
 	if err != nil {
-		return nil, 0, fmt.Errorf("Unparsable port number in %s: %w", nstr, err)
+		return nil, 0, fmt.Errorf("unparsable port number in %s: %w", nstr, err)
 	}
-	fmt.Printf("Converted connection %s to ip=%v port=%d\n", nstr, ip, port)
 	return ip, uint32(port), nil
 }
 

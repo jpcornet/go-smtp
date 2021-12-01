@@ -7,8 +7,8 @@ import (
 )
 
 var (
-	ErrAuthRequired    = errors.New("Please authenticate first")
-	ErrAuthUnsupported = errors.New("Authentication not supported")
+	ErrAuthRequired    = errors.New("please authenticate first")
+	ErrAuthUnsupported = errors.New("authentication not supported")
 )
 
 // A SMTP server backend.

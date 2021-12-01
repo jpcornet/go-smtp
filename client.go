@@ -469,9 +469,8 @@ func (c *Client) XClient(xc XClientOptions) error {
 		cmd += " DESTPORT=" + strconv.Itoa(int(*xc.Destport))
 	}
 	if len(cmd) == 0 {
-		return errors.New("No compatible XCLIENT options to send")
+		return errors.New("no compatible XCLIENT options to send")
 	}
-	fmt.Println("XCLIENT", cmd)
 	_, _, err := c.cmd(220, "XCLIENT%s", cmd)
 	return err
 }
